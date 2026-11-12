@@ -1,0 +1,122 @@
+# Documento de Requisitos de Producto (PRD) -
+
+**Nombre del Producto:** SubAudit AR  
+**Versión:** 1.3 (MVP adaptado a Argentina con impuestos reales y DolarApi)  
+**Tipo de Aplicación:** Web App (Local-First / PWA-Ready)  
+**Público Objetivo:** Usuarios digitales, profesionales y desarrolladores en Argentina con gastos recurrentes en moneda extranjera (herramientas de IA, SaaS, streaming y servicios cloud).
+
+---
+
+## 1. Visión y Justificación del Problema
+
+### 1.1 Declaración del Problema
+En Argentina, la contratación de servicios digitales en moneda extranjera (USD) presenta una distorsión financiera severa: el valor de suscripción anunciado por proveedores internacionales (ej. $20 USD de ChatGPT Plus o $10 USD de GitHub Copilot) nunca coincide con lo debitado en el resumen bancario.
+
+Tras la finalización del Impuesto PAIS, el régimen tributario nacional y subnacional vigente aplica sobre las prestaciones digitales del exterior:
+1. **IVA Servicios Digitales (21%):** Ley N° 27.430 y Decreto 354/2018.
+2. **Percepción Ganancias / Bienes Personales (30%):** Resolución General ARCA (ex AFIP) 5617/2024.
+3. **Percepción Provincial de Ingresos Brutos (IIBB, 1.5% a 3%):** Regulada por las agencias tributarias provinciales según la jurisdicción del titular (ej. AGIP 2%, ARBA 2%, Rentas Córdoba 3%).
+
+Las soluciones existentes fallan porque:
+* Las aplicaciones globales calculan la conversión al cambio oficial plano, omitiendo entre un **51% y un 54% de carga tributaria real**.
+* Las plataformas con Open Banking vulneran la privacidad y no operan con la mayoría de las tarjetas locales.
+* No existe visibilidad sobre el **impacto relativo de las suscripciones de IA**, las cuales suelen absorber más del 60% del gasto digital total de un usuario.
+
+### 1.2 Propuesta de Valor y Diferencial Académico
+SubAudit AR es un auditor financiero **Local-First** que transparenta el costo real de suscripciones en Argentina:
+* **Motor Tributario Legal Desglosado:** Calcula peso a peso la base neta oficial, el IVA (21%), la percepción ARCA (30%) y el recargo provincial de IIBB (2% default configurable), eliminando porcentajes inventados.
+* **Sincronización Cambiaria Abierta:** Conexión directa a **DolarApi.com** (`/v1/dolares/oficial`) para obtener la cotización oficial minorista de venta sin tokens ni costos.
+* **Auditoría de Impacto (Gráfico Pareto de Mayor Gasto):** Identificación visual de las herramientas que dominan el presupuesto mensual.
+* **Categorización Nativa de IA:** Tratamiento específico para plataformas de Inteligencia Artificial frente a ocio y software clásico.
+* **Privacidad y Continuidad Operativa:** Almacenamiento local en el navegador con soporte de caché y fallback offline ante cortes de conexión.
+
+---
+
+## 2. Alcance del Producto (Scope)
+
+### 2.1 Dentro del Alcance (In-Scope - MVP de 7 días)
+* CRUD de suscripciones con soporte de periodicidad (semanal, mensual, trimestral, anual).
+* Categorización con soporte prioritario para `'ai'`, ademas de `'streaming'`, `'software'`, `'cloud'`, `'fitness'`, `'education'` y `'other'`.
+* Integración REST con DolarApi (`GET /v1/dolares/oficial`) con caché local y mecanismo de fallback.
+* Desglose tributario real:
+  * Base ARS al cambio oficial.
+  * IVA Servicios Digitales (21%).
+  * Percepción ARCA RG 5617/2024 (30%).
+  * Percepción Provincial de IIBB (configurable, default 2% para CABA/PBA).
+* Selector de exención impositiva (permite apagar percepciones para personas o entidades exentas).
+* **Módulo Gráfico: Suscripciones de Mayor Gasto:** Gráfico de barras horizontales con orden descendente por costo real final en ARS y porcentaje de impacto sobre el total.
+* Gráfico de torta/dona por categoría de gasto.
+* Métrica de auditoría: Costo real estimado por sesión de uso.
+* Semáforo visual de cobros próximos (3, 7 y 15 días) y exportador de calendario (`.ics`).
+* Copia de seguridad en JSON (exportación/importación) y botón para precargar un conjunto de datos de prueba ("Cargar Demo Argentina").
+
+### 2.2 Fuera del Alcance (Out-of-Scope)
+* Conexión con APIs bancarias privadas (Plaid, Prometeo, Belvo).
+* Servidores backend propios y envío de correos por SMTP (se resuelve con alertas visuales y `.ics`).
+* Web scraping de páginas de streaming.
+
+---
+
+## 3. Especificación de Integración: DolarApi.com
+
+* **Proveedor:** DolarApi (`https://dolarapi.com`)
+* **Endpoint:** `GET https://dolarapi.com/v1/dolares/oficial`
+* **Protocolo:** HTTPS / JSON (sin autenticación, soporte CORS habilitado).
+* **Campos consumidos:**
+  * `venta`: Valor del dólar oficial venta fijado por Banco Nación/entidades oficiales.
+  * `fechaActualizacion`: Marca de tiempo de la cotización provista.
+* **Estrategia de Tolerancia a Fallos:**
+  1. Al iniciar, la app ejecuta un `fetch` con timeout de 3 segundos.
+  2. Si responde `200 OK`, persiste el valor en `LocalStorage` (`subaudit_rate_cache`) y actualiza el encabezado.
+  3. Si la conexión falla, lee la última cotización almacenada en `LocalStorage`.
+  4. Si no existe caché previo, aplica una cotización de contingencia definida en código (ej. $1.060 ARS) y muestra un indicador de *"Modo Offline: Cotización de Respaldo"*.
+  5. Desde los ajustes, el usuario puede sobreescribir manualmente el valor si desea simular cotizaciones proyectadas.
+
+---
+
+## 4. Requisitos Funcionales (FR)
+
+### Módulo 1: Motor Cambiario e Impositivo
+* **FR-1.1:** Consulta automática y no bloqueante del endpoint oficial de DolarApi.
+* **FR-1.2:** Desglose legal visible en cada tarjeta de suscripción y en el dashboard:
+  * $\text{Base ARS} = \text{Monto USD} \times \text{Cotización Oficial Venta}$
+  * $\text{IVA Digital (21\%)} = \text{Base ARS} \times 0.21$
+  * $\text{Percepción ARCA (30\%)} = \text{Base ARS} \times 0.30$
+  * $\text{IIBB Provincial} = \text{Base ARS} \times (\text{\% Alícuota Provincial} / 100)$
+  * $\text{Costo Real Total ARS} = \text{Base ARS} + \text{IVA} + \text{ARCA} + \text{IIBB}$
+* **FR-1.3:** Selector de alícuota provincial de IIBB con presets:
+  * CABA / Buenos Aires (2%).
+  * Córdoba (3%).
+  * Santa Fe (3%).
+  * Exento / Sin percepción (0%).
+* **FR-1.4:** Checkbox global para habilitar o deshabilitar percepciones fiscales (para monotributistas o responsables inscriptos que computan pagos a cuenta o están exentos).
+
+### Módulo 2: Gestión de Suscripciones (CRUD)
+* **FR-2.1:** Alta, modificación, pausado y baja de servicios.
+* **FR-2.2:** Campos obligatorios:
+  * Nombre del servicio.
+  * Categoría: `ai`, `streaming`, `software`, `fitness`, `education`, `cloud`, `other`.
+  * Monto nominal y moneda original (`USD` | `ARS`).
+  * Periodicidad: Semanal, Mensual, Trimestral, Anual.
+  * Próxima fecha de cobro (determinista con `date-fns`).
+  * Estimación de frecuencia de uso: Diario, Semanal, Mensual, Rara vez.
+* **FR-2.3 (Catálogo de referencia):** Autocompletado opcional al tipear nombres estándar (ej. ChatGPT Plus, Claude Pro, Midjourney, Spotify, Netflix, YouTube Premium, GitHub Copilot).
+
+### Módulo 3: Analítica y Gráfico de Mayor Gasto
+* **FR-3.1 (Resumen Financiero Consolidado):**
+  * Gasto Total Mensual Real en ARS (con impuestos).
+  * Discriminación mensual de Impuestos y Percepciones pagadas.
+  * Proyección de gasto anual consolidado en ARS.
+* **FR-3.2 (Gráfico: Suscripciones de Mayor Gasto):**
+  * Gráfico de barras horizontales (Recharts) que ordena de mayor a menor las suscripciones según su costo mensualizado final en ARS.
+  * Cada barra muestra: Nombre del servicio, costo total en ARS y porcentaje sobre el gasto mensual total del usuario.
+  * Indicador de alerta visual (color diferenciado) para servicios que consuman más del 20% del presupuesto.
+* **FR-3.3 (Gráfico por Categoría):** Gráfico de dona con la distribución porcentual del presupuesto en ARS (`IA` vs. `Streaming` vs. `Software`).
+* **FR-3.4 (Auditoría de Uso Ocioso):** Métrica que divide el costo real mensual por la cantidad de usos estimados, emitiendo una sugerencia de cancelación si el uso es "Rara vez" y el costo supera un umbral de advertencia.
+
+### Módulo 4: Notificaciones y Exportación
+* **FR-4.1 (Semáforo de Vencimientos):**
+  * Rojo: Cobro en $\le 3$ días.
+  * Amarillo: Cobro entre 4 y 7 días.
+  * Verde: Cobro en $> 7$ días.
+* **FR-4.2 (Exportador `.ics`):** Generación en el cliente de un archivo de calendario con eventos recurrentes y recordatorios pre-configurados (24 hs antes del cobro) compatible con Google Calendar y Apple Calendar.
