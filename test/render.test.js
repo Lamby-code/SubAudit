@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   PLAYER_RADIUS,
@@ -7,6 +8,7 @@ import {
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
   createInitialState,
+  isWon,
 } from '../js/sim.js';
 import { LEVEL_1 } from '../js/levels.js';
 import { centeredRect, victoryLayout, render } from '../js/render.js';
@@ -18,7 +20,15 @@ import { centeredRect, victoryLayout, render } from '../js/render.js';
  * so the tests can assert the order of the layers, not just that nothing threw.
  */
 const createFakeContext = () => {
-  const ctx = { calls: [], fillStyle: '', strokeStyle: '', lineWidth: 1 };
+  const ctx = {
+    calls: [],
+    fillStyle: '',
+    strokeStyle: '',
+    lineWidth: 1,
+    font: '',
+    textAlign: '',
+    textBaseline: '',
+  };
   const record = (op) => (...args) => {
     ctx.calls.push({
       op,
@@ -26,10 +36,14 @@ const createFakeContext = () => {
       fillStyle: ctx.fillStyle,
       strokeStyle: ctx.strokeStyle,
       lineWidth: ctx.lineWidth,
+      font: ctx.font,
+      textAlign: ctx.textAlign,
+      textBaseline: ctx.textBaseline,
     });
   };
   for (const op of [
     'fillRect',
+    'strokeRect',
     'beginPath',
     'arc',
     'fill',
@@ -42,10 +56,12 @@ const createFakeContext = () => {
   ]) {
     ctx[op] = record(op);
   }
+  // Deterministic text metrics: 18 px per character.
+  ctx.measureText = (text) => ({ width: text.length * 18 });
   return ctx;
 };
 
-const DRAW_OPS = new Set(['fillRect', 'arc', 'fill', 'stroke', 'fillText']);
+const DRAW_OPS = new Set(['fillRect', 'strokeRect', 'arc', 'fill', 'stroke', 'fillText']);
 
 const drawingCalls = (calls) => calls.filter((call) => DRAW_OPS.has(call.op));
 
@@ -198,4 +214,136 @@ test('RNF-2/constitution 3: importing render.js in Node never needs a DOM', () =
     second.calls.map((call) => [call.op, call.args]),
     'two renders of the same state must record identical draw calls',
   );
+});
+
+// --- victory overlay ---------------------------------------------------------
+
+const VICTORY_MESSAGE = '¡Nivel 1 completado!';
+const VEIL_FILL = 'rgba(20, 22, 26, 0.72)';
+
+const wonState = () => ({ level: LEVEL_1, player: { x: LEVEL_1.meta.x, y: LEVEL_1.meta.y, r: PLAYER_RADIUS } });
+
+const textCalls = (calls) => calls.filter((call) => call.op === 'fillText');
+
+test('RF-15: a won state draws the victory message exactly once', () => {
+  const state = wonState();
+  assert.equal(isWon(state), true, 'the helper state must really be won');
+
+  const ctx = createFakeContext();
+  render(ctx, state);
+
+  const texts = textCalls(ctx.calls);
+  assert.equal(texts.length, 1, 'the message must be drawn once, not duplicated');
+  assert.equal(texts[0].args[0], VICTORY_MESSAGE);
+});
+
+test('RNF-5/CL-12: the message is the literal Spanish string with both marks', () => {
+  const ctx = createFakeContext();
+  render(ctx, wonState());
+
+  const [text] = textCalls(ctx.calls);
+  assert.ok(text, 'the victory text must be drawn');
+  assert.equal(text.args[0], '¡Nivel 1 completado!');
+  assert.ok(text.args[0].startsWith('¡'), 'the opening mark must be present');
+  assert.ok(text.args[0].endsWith('!'), 'the closing mark must be present');
+  assert.ok(text.args[0].includes('Nivel 1'), 'the level number must be present');
+  assert.equal(text.args.length, 3, 'the message must be one single full call (text, x, y)');
+});
+
+test('RF-15: the message uses bold 36px white, centred, at the play-area centre', () => {
+  const ctx = createFakeContext();
+  render(ctx, wonState());
+
+  const [text] = textCalls(ctx.calls);
+  assert.equal(text.args[1], CANVAS_WIDTH / 2, 'the message must be centred at x = 480');
+  assert.equal(text.args[2], CANVAS_HEIGHT / 2, 'the message must be centred at y = 300');
+  assert.equal(text.textAlign, 'center');
+  assert.equal(text.textBaseline, 'middle');
+  assert.equal(text.fillStyle, '#ffffff');
+  assert.match(text.font, /bold/, 'the font must be bold');
+  assert.match(text.font, /36px/, 'the font must be 36 px');
+});
+
+test('RF-15: the message is drawn after the player and after the veil', () => {
+  const ctx = createFakeContext();
+  render(ctx, wonState());
+  const { calls } = ctx;
+
+  const textIndex = calls.findIndex((call) => call.op === 'fillText');
+  const playerArc = lastIndexOf(calls, (call) => call.op === 'arc' && call.args[2] === PLAYER_RADIUS);
+  const veilIndex = calls.findIndex(
+    (call) => call.op === 'fillRect' && call.fillStyle === VEIL_FILL,
+  );
+
+  assert.ok(veilIndex > playerArc, 'the veil must cover the player (drawn after it)');
+  assert.ok(textIndex > playerArc, 'the message must be drawn after the player');
+  assert.ok(textIndex > veilIndex, 'the message must be drawn after the veil');
+});
+
+test('RF-15: the veil covers the whole play area and the text sits inside the panel', () => {
+  const ctx = createFakeContext();
+  render(ctx, wonState());
+  const { calls } = ctx;
+
+  const veils = calls.filter((call) => call.op === 'fillRect' && call.fillStyle === VEIL_FILL);
+  assert.equal(veils.length, 1, 'the veil must be painted once');
+  assert.deepEqual(veils[0].args, [0, 0, CANVAS_WIDTH, CANVAS_HEIGHT]);
+
+  // The text width comes from the fake measureText, so the expected panel is known.
+  const expected = victoryLayout(CANVAS_WIDTH, CANVAS_HEIGHT, VICTORY_MESSAGE.length * 18, 36);
+  const [text] = textCalls(calls);
+  const panel = calls.find(
+    (call) => call.op === 'fillRect' && call.fillStyle !== VEIL_FILL && call.fillStyle !== '#14161a' && call.fillStyle !== '#3a4048',
+  );
+  assert.ok(panel, 'the panel must be painted');
+  assert.deepEqual(panel.args, [expected.panel.x, expected.panel.y, expected.panel.w, expected.panel.h]);
+  assert.notEqual(panel.fillStyle, VEIL_FILL, 'the panel must be opaque, not the veil colour');
+
+  const halfTextWidth = (VICTORY_MESSAGE.length * 18) / 2;
+  assert.ok(text.args[1] - halfTextWidth >= panel.args[0], 'the text must not overflow the panel (left)');
+  assert.ok(text.args[1] + halfTextWidth <= panel.args[0] + panel.args[2], 'the text must not overflow the panel (right)');
+  assert.ok(text.args[2] - 36 / 2 >= panel.args[1], 'the text must not overflow the panel (top)');
+  assert.ok(text.args[2] + 36 / 2 <= panel.args[1] + panel.args[3], 'the text must not overflow the panel (bottom)');
+
+  // The panel has a light border so it reads without relying on colour alone.
+  const border = calls.find((call) => call.op === 'strokeRect');
+  assert.ok(border, 'the panel must have a visible border');
+  assert.deepEqual(border.args, panel.args);
+});
+
+test('RF-16/CL-6/RF-19: no message before winning and the overlay never gets consumed', () => {
+  const idle = createFakeContext();
+  render(idle, createInitialState(LEVEL_1));
+  assert.equal(textCalls(idle.calls).length, 0, 'a live level must not show the message');
+  assert.equal(
+    idle.calls.filter((call) => call.fillStyle === VEIL_FILL).length,
+    0,
+    'a live level must not be veiled',
+  );
+
+  const first = createFakeContext();
+  render(first, wonState());
+  const second = createFakeContext();
+  render(second, wonState());
+  assert.deepEqual(
+    first.calls.map((call) => [call.op, call.args]),
+    second.calls.map((call) => [call.op, call.args]),
+    'rendering a won state twice must paint the same message twice (no consumed flag)',
+  );
+  assert.equal(textCalls(first.calls).length, 1);
+  assert.equal(
+    textCalls(first.calls)[0].args[0],
+    textCalls(second.calls)[0].args[0],
+    'the message must not change between frames',
+  );
+});
+
+test('RF-19: main.js offers no restart, reset or level-change handler', () => {
+  const source = readFileSync(new URL('../js/main.js', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(source, /restart/i, 'no restart handler is allowed');
+  assert.doesNotMatch(source, /location\.reload/, 'no page reload is allowed');
+  assert.doesNotMatch(source, /KeyR['"]/, 'KeyR must not be bound');
+  assert.doesNotMatch(source, /Delete['"]/, 'Delete must not be bound');
+  assert.doesNotMatch(source, /LEVELS\[/, 'no level switching is allowed');
 });
