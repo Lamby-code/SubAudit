@@ -4,18 +4,86 @@
 
 import { CANVAS_WIDTH, CANVAS_HEIGHT, PLAYER_RADIUS, META_RADIUS, isWon } from './sim.js';
 
-const COLORS = {
+// The single source of truth for every colour in the scene. Tests import this
+// table and check the WCAG ratios between its entries (RNF-4), and they also
+// assert that render() paints exactly these strings: a colour changed in one
+// place only is caught immediately.
+export const COLORS = Object.freeze({
   background: '#14161a',
   wall: '#3a4048',
   meta: '#ffb703',
   metaRing: '#ffd166',
-  metaEdge: '#3d2a00',
+  metaBorder: '#3d2a00',
   player: '#ffffff',
-  playerEdge: '#14161a',
+  playerOutline: '#14161a',
   veil: 'rgba(20, 22, 26, 0.72)',
   panel: '#22262c',
-  panelEdge: '#8b93a1',
+  panelBorder: '#8b93a1',
   text: '#ffffff',
+});
+
+// WCAG 2.x uses the sRGB transfer function with the 0.03928 knee.
+const LINEAR_KNEE = 0.03928;
+const toLinearChannel = (channel) => {
+  const c = channel / 255;
+  return c <= LINEAR_KNEE ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+};
+
+/**
+ * Parses a CSS colour into its three 8-bit channels.
+ * Accepted: #rgb, #rrggbb, rgb(r, g, b) and rgba(r, g, b, a).
+ * Alpha is silently ignored: contrast is always measured between opaque
+ * colours, so the veil's alpha does not take part in the ratio.
+ * @param {string} color
+ * @returns {[number, number, number]}
+ */
+const parseColor = (color) => {
+  const value = String(color).trim();
+
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(value);
+  if (hex) {
+    const digits = hex[1];
+    const full = digits.length === 3 ? [...digits].map((d) => d + d).join('') : digits;
+    return [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16));
+  }
+
+  const rgb = /^rgba?\(([^)]+)\)$/i.exec(value);
+  if (rgb) {
+    const parts = rgb[1].split(',').map((part) => Number(part.trim()));
+    if (parts.length >= 3 && parts.slice(0, 3).every((n) => Number.isFinite(n))) {
+      return parts.slice(0, 3);
+    }
+  }
+
+  throw new Error(`Unsupported colour: ${color}`);
+};
+
+/**
+ * WCAG 2.x relative luminance of a colour: 0 for black, 1 for white.
+ * Pure: no DOM, no canvas.
+ * @param {string} color
+ * @returns {number}
+ */
+export const relativeLuminance = (color) => {
+  const [r, g, b] = parseColor(color);
+  return (
+    0.2126 * toLinearChannel(r) + 0.7152 * toLinearChannel(g) + 0.0722 * toLinearChannel(b)
+  );
+};
+
+/**
+ * WCAG 2.x contrast ratio between two colours: 1 (identical) to 21 (black on
+ * white). Symmetric: the order of the arguments does not matter.
+ * @param {string} colorA
+ * @param {string} colorB
+ * @returns {number}
+ */
+export const contrastRatio = (colorA, colorB) => {
+  const a = relativeLuminance(colorA);
+  const b = relativeLuminance(colorB);
+  const lighter = Math.max(a, b);
+  const darker = Math.min(a, b);
+  return (lighter + 0.05) / (darker + 0.05);
 };
 
 const META_RING_RADIUS = META_RADIUS * 0.55;
@@ -88,7 +156,7 @@ const drawWalls = (ctx, walls) => {
 const drawMeta = (ctx, meta) => {
   // Solid base disc with a dark border: one path, filled and then stroked.
   ctx.fillStyle = COLORS.meta;
-  ctx.strokeStyle = COLORS.metaEdge;
+  ctx.strokeStyle = COLORS.metaBorder;
   ctx.lineWidth = META_BORDER_WIDTH;
   ctx.beginPath();
   ctx.arc(meta.x, meta.y, META_RADIUS, 0, Math.PI * 2);
@@ -109,7 +177,7 @@ const drawPlayer = (ctx, player) => {
   ctx.arc(player.x, player.y, PLAYER_RADIUS, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = COLORS.playerEdge;
+  ctx.strokeStyle = COLORS.playerOutline;
   ctx.lineWidth = PLAYER_EDGE_WIDTH;
   ctx.beginPath();
   ctx.arc(player.x, player.y, PLAYER_RADIUS, 0, Math.PI * 2);
@@ -132,7 +200,7 @@ const drawVictory = (ctx) => {
   // Opaque panel with a light border so the text is legible on its own.
   ctx.fillStyle = COLORS.panel;
   ctx.fillRect(panel.x, panel.y, panel.w, panel.h);
-  ctx.strokeStyle = COLORS.panelEdge;
+  ctx.strokeStyle = COLORS.panelBorder;
   ctx.lineWidth = PANEL_EDGE_WIDTH;
   ctx.strokeRect(panel.x, panel.y, panel.w, panel.h);
 

@@ -11,7 +11,14 @@ import {
   isWon,
 } from '../js/sim.js';
 import { LEVEL_1 } from '../js/levels.js';
-import { centeredRect, victoryLayout, render } from '../js/render.js';
+import {
+  COLORS,
+  centeredRect,
+  contrastRatio,
+  relativeLuminance,
+  render,
+  victoryLayout,
+} from '../js/render.js';
 
 // --- fake canvas 2d context --------------------------------------------------
 
@@ -347,3 +354,197 @@ test('RF-19: main.js offers no restart, reset or level-change handler', () => {
   assert.doesNotMatch(source, /Delete['"]/, 'Delete must not be bound');
   assert.doesNotMatch(source, /LEVELS\[/, 'no level switching is allowed');
 });
+
+// --- verifiable contrast (RNF-4) ---------------------------------------------
+
+const MIN_TEXT_CONTRAST = 4.5;
+const MIN_GRAPHIC_CONTRAST = 3;
+
+test('RNF-4: relativeLuminance and contrastRatio follow WCAG 2.x', () => {
+  assert.equal(relativeLuminance('#ffffff'), 1);
+  assert.equal(relativeLuminance('#000000'), 0);
+
+  // #rgb expands to #rrggbb.
+  assert.equal(relativeLuminance('#fff'), 1);
+  assert.equal(relativeLuminance('#000'), 0);
+
+  assert.ok(
+    Math.abs(contrastRatio('#ffffff', '#000000') - 21) <= 0.01,
+    `black on white must be ~21:1, got ${contrastRatio('#ffffff', '#000000')}`,
+  );
+
+  // Alpha is ignored on purpose (documented in render.js): the veil and the
+  // background are the same colour, they differ only in opacity.
+  assert.equal(relativeLuminance(COLORS.veil), relativeLuminance(COLORS.background));
+
+  // rgb()/rgba() notation gives the same numbers as the hex form.
+  assert.equal(contrastRatio('rgb(255, 255, 255)', '#000000'), contrastRatio('#ffffff', '#000000'));
+  assert.equal(relativeLuminance('rgba(255, 255, 255, 0.5)'), 1);
+});
+
+test('RNF-4: every scene pair meets its WCAG threshold', () => {
+  const ratios = {
+    'text/panel': contrastRatio(COLORS.text, COLORS.panel),
+    'player/background': contrastRatio(COLORS.player, COLORS.background),
+    'player/wall': contrastRatio(COLORS.player, COLORS.wall),
+    'meta/background': contrastRatio(COLORS.meta, COLORS.background),
+    'meta/wall': contrastRatio(COLORS.meta, COLORS.wall),
+  };
+  const thresholds = {
+    'text/panel': MIN_TEXT_CONTRAST,
+    'player/background': MIN_GRAPHIC_CONTRAST,
+    'player/wall': MIN_GRAPHIC_CONTRAST,
+    'meta/background': MIN_GRAPHIC_CONTRAST,
+    'meta/wall': MIN_GRAPHIC_CONTRAST,
+  };
+
+  for (const [pair, ratio] of Object.entries(ratios)) {
+    assert.ok(
+      Number.isFinite(ratio) && ratio >= thresholds[pair],
+      `${pair} must reach ${thresholds[pair]}:1, got ${ratio}`,
+    );
+  }
+});
+
+test('RNF-4: the meta reads by shape, not only by colour', () => {
+  const ctx = createFakeContext();
+  render(ctx, createInitialState(LEVEL_1));
+
+  const playerArc = lastIndexOf(
+    ctx.calls,
+    (call) => call.op === 'arc' && call.args[2] === PLAYER_RADIUS && call.strokeStyle === COLORS.playerOutline,
+  );
+  assert.ok(playerArc > 0, 'the player outline must be drawn');
+
+  const metaStrokes = ctx.calls.filter(
+    (call, index) =>
+      index < playerArc &&
+      call.op === 'stroke' &&
+      (call.strokeStyle === COLORS.metaBorder || call.strokeStyle === COLORS.metaRing),
+  );
+  assert.ok(metaStrokes.length >= 2, `the meta needs at least 2 strokes, got ${metaStrokes.length}`);
+
+  const styles = new Set(metaStrokes.map((call) => call.strokeStyle));
+  assert.deepEqual(
+    [...styles].sort(),
+    [COLORS.metaBorder, COLORS.metaRing].sort(),
+    'the meta must combine a dark border and a lighter inner ring',
+  );
+
+  // Both strokes are on the meta centre, at different radii (disc edge vs ring).
+  const metaArcs = ctx.calls
+    .filter((call, index) => index < playerArc && call.op === 'arc' && call.args[0] === LEVEL_1.meta.x && call.args[1] === LEVEL_1.meta.y)
+    .map((call) => call.args[2]);
+  assert.ok(new Set(metaArcs).size >= 2, 'the meta must be drawn with two different radii');
+});
+
+test('RNF-4: contrastRatio is symmetric and never below 1', () => {
+  const pairs = [
+    ['#ffffff', '#000000'],
+    ['#123456', '#abcdef'],
+    [COLORS.text, COLORS.panel],
+    [COLORS.meta, COLORS.wall],
+    [COLORS.player, COLORS.background],
+    [COLORS.veil, COLORS.background],
+  ];
+
+  for (const [a, b] of pairs) {
+    const forward = contrastRatio(a, b);
+    const backward = contrastRatio(b, a);
+    assert.equal(forward, backward, `contrastRatio(${a}, ${b}) must equal its reverse`);
+    assert.ok(forward >= 1, `contrastRatio(${a}, ${b}) must be >= 1, got ${forward}`);
+  }
+
+  assert.equal(contrastRatio(COLORS.wall, COLORS.wall), 1, 'a colour against itself must be exactly 1');
+});
+
+test('RNF-4: render paints exactly the exported COLORS palette', () => {
+  assert.deepEqual(
+    Object.keys(COLORS).sort(),
+    [
+      'background',
+      'meta',
+      'metaBorder',
+      'metaRing',
+      'panel',
+      'panelBorder',
+      'player',
+      'playerOutline',
+      'text',
+      'veil',
+      'wall',
+    ].sort(),
+    'COLORS must expose the full palette',
+  );
+
+  const ctx = createFakeContext();
+  render(ctx, wonState());
+  const { calls } = ctx;
+
+  // Background and walls.
+  assert.equal(calls[0].fillStyle, COLORS.background);
+  assert.deepEqual(calls[0].args, [0, 0, CANVAS_WIDTH, CANVAS_HEIGHT]);
+  assert.equal(
+    calls.filter((call) => call.op === 'fillRect' && call.fillStyle === COLORS.wall).length,
+    LEVEL_1.walls.length,
+    'every wall must use COLORS.wall',
+  );
+
+  // Meta: one filled disc with the base colour, two strokes with the palette.
+  assert.ok(
+    calls.some((call) => call.op === 'fill' && call.fillStyle === COLORS.meta),
+    'the meta disc must be filled with COLORS.meta',
+  );
+  assert.ok(
+    calls.some((call) => call.op === 'stroke' && call.strokeStyle === COLORS.metaBorder),
+    'the meta border must use COLORS.metaBorder',
+  );
+  assert.ok(
+    calls.some((call) => call.op === 'stroke' && call.strokeStyle === COLORS.metaRing),
+    'the meta ring must use COLORS.metaRing',
+  );
+
+  // Player.
+  assert.ok(
+    calls.some((call) => call.op === 'fill' && call.fillStyle === COLORS.player),
+    'the player body must use COLORS.player',
+  );
+  assert.ok(
+    calls.some((call) => call.op === 'stroke' && call.strokeStyle === COLORS.playerOutline),
+    'the player outline must use COLORS.playerOutline',
+  );
+
+  // Victory overlay.
+  assert.ok(
+    calls.some((call) => call.op === 'fillRect' && call.fillStyle === COLORS.veil),
+    'the veil must use COLORS.veil',
+  );
+  assert.ok(
+    calls.some((call) => call.op === 'fillRect' && call.fillStyle === COLORS.panel),
+    'the panel must use COLORS.panel',
+  );
+  assert.ok(
+    calls.some((call) => call.op === 'strokeRect' && call.strokeStyle === COLORS.panelBorder),
+    'the panel border must use COLORS.panelBorder',
+  );
+  assert.ok(
+    calls.some((call) => call.op === 'fillText' && call.fillStyle === COLORS.text),
+    'the message must use COLORS.text',
+  );
+
+  // No colour may bypass the palette: every style recorded is a COLORS value.
+  const palette = new Set(Object.values(COLORS));
+  const usedStyles = new Set();
+  for (const call of drawingCalls(calls)) {
+    if (call.op === 'fill' || call.op === 'fillRect' || call.op === 'fillText') {
+      usedStyles.add(call.fillStyle);
+    } else {
+      usedStyles.add(call.strokeStyle);
+    }
+  }
+  for (const style of usedStyles) {
+    assert.ok(palette.has(style), `"${style}" is not in COLORS (a literal slipped into render)`);
+  }
+  assert.ok(usedStyles.size >= 8, `render must use the palette, only ${usedStyles.size} colours seen`);
+});
+
