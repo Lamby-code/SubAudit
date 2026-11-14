@@ -10,6 +10,10 @@ export const META_TOUCH_DISTANCE = PLAYER_RADIUS + META_RADIUS;
 export const CANVAS_WIDTH = 960;
 export const CANVAS_HEIGHT = 600;
 
+// Each axis is resolved twice so a push-out that creates a new overlap (inner
+// corner) is caught in the same tick.
+const RESOLVE_PASSES = 2;
+
 /**
  * Builds the starting state of a level.
  * @param {{ spawn: { x: number, y: number } }} level
@@ -68,8 +72,10 @@ export const circleOverlapsRect = (cx, cy, r, rect) => {
  * Applies a displacement on a single axis and pushes the player out of every
  * wall it overlaps, using the sign of that displacement. The push-out leaves
  * the body exactly tangent to the wall face, so contact is stable and never
- * accumulates penetration. One pass per axis for now: the second pass and the
- * inner-corner handling belong to a later task.
+ * accumulates penetration. Two passes per axis: the first one resolves the
+ * wall the body ran into, the second one catches a wall that only starts to
+ * overlap after that push-out (inner corners), so the body ends wedged
+ * without vibrating or slipping through.
  * @param {{ x: number, y: number, r: number }} player
  * @param {Array<{ x: number, y: number, w: number, h: number }>} walls
  * @param {number} dx
@@ -79,12 +85,14 @@ export const circleOverlapsRect = (cx, cy, r, rect) => {
 export const resolveAxis = (player, walls, dx, dy) => {
   const next = { x: player.x + dx, y: player.y + dy, r: player.r };
 
-  for (const wall of walls) {
-    if (!circleOverlapsRect(next.x, next.y, next.r, wall)) continue;
-    if (dx > 0) next.x = wall.x - next.r;
-    else if (dx < 0) next.x = wall.x + wall.w + next.r;
-    else if (dy > 0) next.y = wall.y - next.r;
-    else if (dy < 0) next.y = wall.y + wall.h + next.r;
+  for (let pass = 0; pass < RESOLVE_PASSES; pass += 1) {
+    for (const wall of walls) {
+      if (!circleOverlapsRect(next.x, next.y, next.r, wall)) continue;
+      if (dx > 0) next.x = wall.x - next.r;
+      else if (dx < 0) next.x = wall.x + wall.w + next.r;
+      else if (dy > 0) next.y = wall.y - next.r;
+      else if (dy < 0) next.y = wall.y + wall.h + next.r;
+    }
   }
 
   return next;
