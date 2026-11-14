@@ -113,8 +113,33 @@ export const movePlayer = (player, walls, dx, dy) => {
 };
 
 /**
+ * Euclidean distance between two points.
+ * @param {{ x: number, y: number }} a
+ * @param {{ x: number, y: number }} b
+ * @returns {number}
+ */
+export const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+/**
+ * True when the player's body touches the meta: the two circles overlap, i.e.
+ * the distance between centres is at most the sum of both radii (36 px).
+ * @param {{ level: object, player: { x: number, y: number, r: number } }} state
+ * @returns {boolean}
+ */
+export const touchesMeta = (state) => distance(state.player, state.level.meta) <= META_TOUCH_DISTANCE;
+
+/**
+ * The single victory criterion, an alias of touchesMeta. Victory is derived
+ * from geometry on every call: the state carries no won flag.
+ * @param {{ level: object, player: { x: number, y: number, r: number } }} state
+ * @returns {boolean}
+ */
+export const isWon = (state) => touchesMeta(state);
+
+/**
  * Advances the simulation one fixed tick. Pure: it never mutates the state it
- * receives. With no direction the player stays still (no inertia). The input
+ * receives. A won level is terminal: the state comes back intact and the input
+ * is ignored. With no direction the player stays still (no inertia). The input
  * vector is normalised first, so a diagonal keeps the same total speed
  * (220 px/s) instead of moving faster than a straight line.
  * @param {{ level: object, player: { x: number, y: number, r: number } }} state
@@ -122,6 +147,8 @@ export const movePlayer = (player, walls, dx, dy) => {
  * @returns {{ level: object, player: { x: number, y: number, r: number } }}
  */
 export const step = (state, input) => {
+  if (isWon(state)) return state;
+
   const dir = normalizeDirection(directionFromInput(input));
   if (dir.x === 0 && dir.y === 0) {
     return { level: state.level, player: { ...state.player } };
