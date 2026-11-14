@@ -1,6 +1,6 @@
 # Plan 001 — Esqueleto y Nivel 1
 
-Estado: borrador
+Estado: aprobado
 Base: `specs/001-esqueleto-nivel-1/spec.md` (aprobada). Este plan no agrega comportamiento: solo decide cómo se cumple cada RF.
 
 ## 1. Alcance técnico
@@ -18,10 +18,11 @@ Hito: un cuarto, un jugador que se mueve con WASD/flechas, paredes sólidas con 
 | `js/sim.js` | Constantes numéricas, estado inicial, movimiento, colisiones círculo-AABB, detección de victoria. **Puro y determinista**: no importa nada del navegador, no usa `Math.random`, `Date`, `performance` ni `requestAnimationFrame`. | No crea canvas, no lee eventos, no dibuja, no reproduce audio. |
 | `js/levels.js` | Datos del Nivel 1: spawn, meta, lista de paredes, nombre del nivel y área de juego. **Datos puros**, sin lógica de colisión. | No importa `render.js` ni `main.js`. |
 | `js/render.js` | Todo el dibujo del canvas: fondo, paredes, meta, jugador y superposición de victoria. Funciones puras auxiliares de encuadre (rectángulo centrado) exportadas para test. Al importarse en Node no toca `document` a nivel de módulo. | No calcula física ni lee teclado. |
-| `js/main.js` | Boot: obtiene el canvas y el contexto, arma el estado inicial, escucha teclado y `blur`, corre el bucle de timestep fijo y llama a `step` y `render`. Único archivo que conoce DOM y eventos. | No contiene reglas de movimiento ni de victoria. |
-| `test/*.test.js` | Pruebas de `node --test` sobre `sim.js`, `levels.js` y las funciones de encuadre de `render.js`, más guardas de pureza. | No simulan DOM ni canvas real. |
+| `js/input.js` | Mapeo puro de códigos de teclado (`event.code`) a la entrada del juego: `KEY_BINDINGS` (`KeyW`/`ArrowUp` → `up`, `KeyS`/`ArrowDown` → `down`, `KeyA`/`ArrowLeft` → `left`, `KeyD`/`ArrowRight` → `right`), `keysToInput(codes) → { up, down, left, right }` (acepta cualquier iterable de strings, incluido un `Set`) e `isArrowCode(code) → boolean` para que `main.js` decida el `preventDefault`. **Sin DOM**: no importa nada del navegador ni otros módulos de juego. | No lee eventos, no guarda estado de teclas, no llama a `preventDefault`, no conoce la simulación ni la posición del jugador, no dibuja. |
+| `js/main.js` | Boot: obtiene el canvas y el contexto, arma el estado inicial, mantiene el `Set` de `event.code` presionados, escucha teclado, `blur` y `visibilitychange`, corre el bucle de timestep fijo y llama a `step` y `render`. Delega en `input.js` todo el mapeo de códigos a entrada. Único archivo que conoce DOM y eventos. | No contiene reglas de movimiento ni de victoria, ni la tabla tecla → dirección (vive en `input.js`). |
+| `test/*.test.js` | Pruebas de `node --test` sobre `sim.js`, `levels.js`, `input.js` y las funciones de encuadre y de contraste de `render.js`, más guardas de pureza. | No simulan DOM ni canvas real. |
 
-Regla de dependencias: `levels.js` ← `sim.js` ← `main.js` ← `render.js` → solo `main.js` importa los tres; `render.js` puede importar constantes de `sim.js` para radios y no duplica números.
+Regla de dependencias: `levels.js` ← `sim.js` ← `main.js`; `input.js` no importa nada; `render.js` → solo `sim.js` (constantes y `isWon`). `main.js` es el único módulo que importa `levels.js`, `render.js` e `input.js`, y `render.js` no duplica números: los toma de `sim.js`.
 
 ## 3. Estado y modelo de datos
 
@@ -31,7 +32,7 @@ Sin flags ocultos (constitución, principio 3 y §10.4 del diseño): el estado m
 // State
 { level, player: { x, y, r } }          // level = objeto de levels.js
 
-// Input (ya normalizado por main.js)
+// Input (ya normalizado por input.js)
 { up, down, left, right }               // booleanos
 
 // Wall (AABB)
@@ -171,8 +172,8 @@ No se agregan más paredes ni decoración: el Nivel 1 enseña a moverse y a leer
   - `while (accumulator >= TICK_SECONDS) { state = step(state, readInput()); accumulator -= TICK_SECONDS; }`
   - `render(ctx, state)` una vez por frame visual.
 - Máximo de ticks por frame visual opcional (p. ej. 5) para no congelar tras un `blur` largo; el estado resultante es el mismo porque cada tick es determinista.
-- **Input:** `Set` de `event.code` (`KeyW`, `KeyA`, `KeyS`, `KeyD`, `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`); `preventDefault()` en las flechas para que no scrollee la página. `readInput()` arma `{ up, down, left, right }` desde el set.
-- **RF-9 / CL-7:** en `window.blur` se vacía el set de teclas, así que al volver el jugador está quieto hasta una nueva pulsación. También se vacía en `visibilitychange` oculto.
+- **Input:** `Set` de `event.code` (`KeyW`, `KeyA`, `KeyS`, `KeyD`, `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`); `preventDefault()` en las flechas vía `isArrowCode` para que no scrollee la página. `readInput()` es `keysToInput(pressed)` de `input.js`: `main.js` solo mantiene el set y no traduce códigos.
+- **RF-9 / CL-7:** en `window.blur` se vacía el set de teclas, así que al volver el jugador está quieto hasta una nueva pulsación. También se vacía en `visibilitychange` oculto. El efecto es testeable sin DOM: `keysToInput(new Set())` da todo `false` y `step` con esa entrada no mueve al jugador.
 - RF-16/RF-19: no hay manejadores de reinicio ni de cambio de nivel; con victoria, `step` ignora el input y el render mantiene el mensaje.
 
 ## 8. Render (`js/render.js`)
@@ -188,6 +189,8 @@ Orden de dibujo: fondo → paredes → meta → jugador → superposición de vi
 | Victoria | velo `rgba(20,22,26,0.72)` + panel centrado + texto `¡Nivel 1 completado!` | RF-15, RNF-5 |
 
 - Funciones puras exportadas para test: `centeredRect(areaW, areaH, w, h) → {x, y, w, h}` (centrado exacto del panel) y `victoryLayout(areaW, areaH, textWidth, textHeight) → {panel, textX, textY}`.
+- Helpers puros exportados para verificar legibilidad sin canvas (RNF-4): `relativeLuminance(hex) → number` (sRGB → lineal por canal, pesos `0.2126 / 0.7152 / 0.0722`) y `contrastRatio(hexA, hexB) → number` (fórmula WCAG 2.x, `(Lclaro + 0.05) / (Loscuro + 0.05)`). `COLORS` se exporta: los tests miden exactamente los hex que se pintan y el render no repite strings de color sueltos.
+- Umbrales verificados por test: texto del panel (`text` sobre `panel`) ≥ 4.5:1; jugador (`player`) vs fondo ≥ 3:1; jugador vs pared ≥ 3:1; meta (`meta`) vs fondo ≥ 3:1. Además la meta se reconoce **por forma** —disco + anillo interior (`arc`/`stroke`) + borde oscuro—, lo que ya cubren los tests de orden de dibujo y de `arc`/`stroke` del render.
 - El texto usa `bold 36px system-ui, sans-serif`, `fillStyle: '#ffffff'`, `textAlign: 'center'`, `textBaseline: 'middle'`, centrado en el área de juego (960 × 600), no en la ventana.
 - El panel tiene borde claro y el texto está sobre fondo opaco: legible sin depender del color (RF-15). El texto es literal, con `¡` y `!` (RNF-5, CL-12).
 - Sin `devicePixelRatio`: el canvas se dibuja a 960 × 600 y CSS lo muestra a 960 × 600; el tamaño es fijo y centrado, sin escalado (RNF-2).
@@ -201,12 +204,13 @@ Orden de dibujo: fondo → paredes → meta → jugador → superposición de vi
 | Victoria derivada de la distancia (`isWon`) | `state.won = true` y flag de mensaje mostrado | La constitución prohíbe flags ocultos y el diseño exige derivar el estado de posiciones; además hace RF-17 idempotente sin código extra. |
 | `step` devuelve un estado nuevo | Mutar el estado en el lugar | Facilita tests de determinismo y evita efectos colaterales; el estado es chico (2 objetos). |
 | Estado mínimo `{ level, player }` sin `tick` | Guardar contador de frames y tiempo | No hay límite de tiempo ni grabación en este hito; agregar tiempo ahora sería estado muerto que la spec 002 redefiniría. |
-| Input como `{ up, down, left, right }` normalizado en `main.js` | Pasar el `Set` de teclas a `sim.js` | `sim.js` no debe conocer códigos de teclado del navegador; así es puro y testeable con objetos literales. |
+| Input como `{ up, down, left, right }` normalizado fuera de la simulación | Pasar el `Set` de teclas a `sim.js` | `sim.js` no debe conocer códigos de teclado del navegador; así es puro y testeable con objetos literales. |
+| Mapeo de teclas en `js/input.js` (`KEY_BINDINGS`, `keysToInput`, `isArrowCode`) | Dejar el mapeo dentro de `main.js`, junto a los listeners | El mapeo es lógica pura, pero `main.js` toca DOM y no se puede importar en Node: con el mapeo adentro, RF-9 / CL-7 quedaban sin test automatizado. Un módulo propio los cubre y `sim.js` sigue sin conocer códigos de teclado. |
 | Constantes numéricas exportadas desde `sim.js` | Archivo `js/constants.js` o duplicarlas en `render.js` | Una sola fuente de verdad para radios y velocidad sin sumar un módulo; `render` importa radios desde `sim`. |
 | Pared interior vertical con dos pasos laterales | Laberinto en S o una pared con un solo paso | Un solo obstáculo ya cumple RF-4/4b/4c y enseña el verbo caminar sin frustrar; más geometría es contenido de niveles posteriores. |
 | Canvas de tamaño fijo 960 × 600, sin `devicePixelRatio` | Escalado responsivo o *fit* al viewport | La spec exige tamaño fijo, centrado y sin estiramiento; el escalado introduce diferencias subpíxel entre equipos y complica RNF-2. |
 | Mensaje de victoria dibujado en el canvas | Elemento HTML superpuesto | Un solo lugar de render, sin sincronización de estilos; el texto sigue siendo seleccionable/discernible y la spec no exige DOM semántico. |
-| `node --test` sobre módulos ES puros | Frameworks de test o jsdom | Cero dependencias (constitución, principio 1); `sim.js` y `levels.js` no necesitan DOM y las funciones de encuadre de `render.js` son matemática pura. |
+| `node --test` sobre módulos ES puros | Frameworks de test o jsdom | Cero dependencias (constitución, principio 1); `sim.js` y `levels.js` no necesitan DOM y las funciones de encuadre y contraste de `render.js` son matemática pura. |
 
 ## 10. Determinismo y pureza
 
@@ -218,7 +222,7 @@ Orden de dibujo: fondo → paredes → meta → jugador → superposición de vi
 
 ## 11. Estrategia de tests (`node --test`)
 
-Los tests importan `sim.js`, `levels.js` y las funciones de encuadre de `render.js`. No hay DOM, ni canvas real, ni red. Comando: `node --test` en la raíz (detecta `test/*.test.js`).
+Los tests importan `sim.js`, `levels.js`, `input.js` y las funciones puras de `render.js` (encuadre y contraste). No hay DOM, ni canvas real, ni red. Comando: `node --test` en la raíz (detecta `test/*.test.js`).
 
 | Archivo | Casos | RF |
 |---|---|---|
@@ -226,9 +230,10 @@ Los tests importan `sim.js`, `levels.js` y las funciones de encuadre de `render.
 | `test/level.test.js` | El perímetro cubre los cuatro bordes sin huecos; spawn libre de paredes y de la meta y a más de 36 px de ella; el círculo completo de la meta (centro `(816,536)`, radio 24) está dentro del área de juego con margen ≥ 1 px a cada pared; ningún AABB de pared se solapa con ese círculo (RF-4b); el segmento spawn→meta intersecta el pilar interior (RF-4); ambas cosas a la vez (RF-4c); BFS en grilla de 6 px desde el spawn alcanza el centro de la meta (CL-9, CL-10); el paso superior y el inferior miden ≥ diámetro del jugador y el corredor del centro en el paso inferior contiene `y = 536`. | RF-2, RF-3, RF-4/4b/4c, CL-9, CL-10 |
 | `test/movement.test.js` | Sin input la posición no cambia (RF-8); una tecla mueve `220/60 ≈ 3.6667 px` por tick en el eje correcto (RF-5, RNF-1); al soltar, el siguiente tick no se mueve (RF-10); caminar contra la pared oeste/sur deja al jugador exactamente tangente y nunca dentro del AABB (RF-11, RF-3); 600 ticks empujando la pared no acumulan penetración (RF-13, CL-3); el paso máximo es menor que el grosor mínimo de pared y que el diámetro (RNF-3). | RF-3, RF-5, RF-8, RF-10, RF-11, RF-13, RNF-3 |
 | `test/input.test.js` | Diagonal `up+right` recorre `220/60 px` de módulo, no `× √2` (RF-6); `left+right` deja X quieto y permite avanzar en Y (RF-7, CL-1); `up+down` anula Y; tres teclas se comportan como dos ortogonales; teclas opuestas no producen oscilación. | RF-6, RF-7, CL-1 |
+| `test/keyboard.test.js` | `keysToInput` con WASD, con flechas, con ambas mezcladas, con teclas desconocidas y con `Set` vacío (todo `false`); teclas opuestas apagan su eje; `isArrowCode` es verdadero solo para `ArrowUp`/`ArrowDown`/`ArrowLeft`/`ArrowRight`. Comportamiento de RF-9 / CL-7: vaciar el `Set` de teclas (lo que hacen `blur` y `visibilitychange`) y pasar la entrada resultante a `step` deja al jugador inmóvil tick a tick, mientras una pulsación nueva vuelve a moverlo. Guarda de pureza: `input.js` no menciona `document` ni `window` y no importa `sim.js`. | RF-9, CL-7 |
 | `test/slide.test.js` | Diagonal contra la pared oeste conserva el avance vertical (RF-12); diagonal contra el obstáculo interior conserva el avance vertical; esquina inferior izquierda: X e Y se detienen y la posición queda estable tick a tick (CL-2); empujar en diagonal 300 ticks no atraviesa ninguna pared. | RF-11, RF-12, RF-13, CL-2 |
 | `test/victory.test.js` | Distancia 36.1 ⇒ no gana; exactamente 36 ⇒ gana (CL-13); 35.9 ⇒ gana; desde el spawn `isWon` es `false`; recorrido completo por los pasos hasta la meta ⇒ gana (CL-4, CL-10); tras ganar, `step` con input devuelve la misma posición y sigue ganando (RF-16, CL-6); tocar meta en contacto con pared ⇒ gana (CL-5); 36000 ticks quieto no produce derrota ni cambio de estado (CL-8, RF-18); `step` no muta el estado original. | RF-14, RF-16, RF-17, RF-18, CL-4/5/6/8/13 |
-| `test/render.test.js` | `centeredRect` centra el panel en 960 × 600 con tolerancia 0.5 px; `victoryLayout` devuelve el texto centrado en el área de juego y dentro del panel; ninguna función de encuadre depende de tamaño de ventana. | RF-15, RNF-2, CL-12 |
+| `test/render.test.js` | `centeredRect` centra el panel en 960 × 600 con tolerancia 0.5 px; `victoryLayout` devuelve el texto centrado en el área de juego y dentro del panel; ninguna función de encuadre depende de tamaño de ventana. `relativeLuminance` da 0 para `#000000` y 1 para `#ffffff`; `contrastRatio` es simétrico (`ratio(a,b) === ratio(b,a)`) y máximo entre blanco y negro; umbrales de RNF-4 sobre los hex de `COLORS`: texto/panel ≥ 4.5:1, jugador/fondo ≥ 3:1, jugador/pared ≥ 3:1, meta/fondo ≥ 3:1; la meta se dibuja con `arc` + borde (`stroke`) y anillo interior, reconocible por forma. | RF-15, RNF-2, RNF-4, CL-12 |
 | `test/purity.test.js` | El fuente de `sim.js` no menciona `document`, `window`, `Math.random`, `Date`, `performance`; `levels.js` no importa `sim.js`, `render.js` ni `main.js`; los radios de meta/jugador son 24/12 y `META_TOUCH_DISTANCE` es 36. | RNF-3, RNF-6, constitución 3 |
 | `test/determinism.test.js` | La misma secuencia de estados de teclas frame a frame, repetida dos veces, produce posiciones idénticas bit a bit; el resultado no depende de cuántos pasos se agrupen por frame visual (5 ticks en un frame = 5 llamadas a `step`). | RNF-6, RF-5 |
 
@@ -243,7 +248,7 @@ Criterio de test: cada test nombra el RF en el título (`test('RF-12: ...')`) pa
 | RF-3 | §6 perímetro, §5 colisión, `test/movement.test.js`, `test/level.test.js` |
 | RF-4 / RF-4b / RF-4c | §6 geometría y verificaciones, `test/level.test.js` |
 | RF-5, RF-6, RF-7, RF-8, RF-10 | §4, §5 `directionFromInput` / `normalizeDirection` / `step`, `test/movement.test.js`, `test/input.test.js` |
-| RF-9 | §7 `blur` + `visibilitychange` |
+| RF-9 / CL-7 | §7 `blur` + `visibilitychange` (vaciado del `Set`), §2 `js/input.js` (`keysToInput`), `test/keyboard.test.js`; `main.js` solo mantiene y limpia el set |
 | RF-11, RF-12, RF-13 | §5 `resolveAxis` / `movePlayer`, `test/movement.test.js`, `test/slide.test.js` |
 | RF-14, RF-17 | §4 `META_TOUCH_DISTANCE`, §5 `touchesMeta` / `isWon`, `test/victory.test.js` |
 | RF-15 | §8 superposición de victoria, `test/render.test.js` |
@@ -252,7 +257,7 @@ Criterio de test: cada test nombra el RF en el título (`test('RF-12: ...')`) pa
 | RNF-1 | §7 acumulador de 60 Hz, `test/movement.test.js` |
 | RNF-2 | §2 `style.css`, §8 canvas fijo, `test/smoke.test.js`, `test/render.test.js` |
 | RNF-3 | §5 invariante paso < grosor, `test/movement.test.js`, `test/purity.test.js` |
-| RNF-4 | §8 contraste y formas, revisión visual |
+| RNF-4 | §8 `COLORS` exportado + `relativeLuminance`/`contrastRatio`, `test/render.test.js` (umbrales 4.5:1 y 3:1), formas de la meta, revisión visual |
 | RNF-5 | §8 texto literal, RF-15 |
 | RNF-6 | §10, `test/victory.test.js`, `test/purity.test.js` |
 | RNF-7 | §7 solo teclado |
@@ -268,7 +273,8 @@ Criterio de test: cada test nombra el RF en el título (`test('RF-12: ...')`) pa
 6. **Teclas retenidas al cambiar de foco.** Se limpia el set en `blur` y en `visibilitychange`; CL-7 cubierto.
 7. **Baja resolución de dibujo en pantallas HiDPI.** Decisión consciente: tamaño fijo sin `devicePixelRatio` para cumplir RNF-2. Si se ve borroso, se resuelve en una spec posterior, no acá.
 8. **Validación visual.** El MCP de Chrome DevTools se usa para abrir `http://localhost:8000`, capturar el cuarto y la pantalla de victoria, y confirmar centrado y legibilidad; no reemplaza los tests ni agrega dependencias al proyecto.
+9. **Duplicación del mapeo al agregar otro dispositivo.** Hoy `input.js` es el único lugar que traduce códigos a `{ up, down, left, right }`; si mañana aparece gamepad o táctil, es tentador agregar un segundo mapeo en `main.js`. Mitigación: `main.js` ya no traduce códigos y `test/keyboard.test.js` fija el contrato de `keysToInput`; cualquier dispositivo nuevo debe producir el mismo objeto de entrada y pasar por ese módulo, no por un camino paralelo.
 
 ## 14. Orden de implementación
 
-Ver `tasks.md`: 10 tareas, de la cáscara de página (T1) a la validación final (T10). Las tareas de lógica van con tests en rojo primero (constitución, principio 4) y cada una deja `node --test` en verde.
+Ver `tasks.md`: 10 tareas, de la cáscara de página (T1) a la validación final (T10), más T11 y T12 en la sección de correcciones posteriores a la validación del tester. Las tareas de lógica van con tests en rojo primero (constitución, principio 4) y cada una deja `node --test` en verde.
