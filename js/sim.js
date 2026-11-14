@@ -33,6 +33,22 @@ export const directionFromInput = (input = {}) => ({
 });
 
 /**
+ * Normalises a direction vector to unit length, or returns { 0, 0 } when
+ * there is no direction. Cardinal components are already unit length; the
+ * diagonal is divided by sqrt(2) using the Math.SQRT1_2 constant, so no
+ * runtime square root or trigonometry is needed.
+ * @param {{ x: number, y: number }} dir
+ * @returns {{ x: number, y: number }}
+ */
+export const normalizeDirection = (dir) => {
+  if (dir.x === 0 && dir.y === 0) return { x: 0, y: 0 };
+  if (dir.x !== 0 && dir.y !== 0) {
+    return { x: dir.x * Math.SQRT1_2, y: dir.y * Math.SQRT1_2 };
+  }
+  return { x: dir.x, y: dir.y };
+};
+
+/**
  * Circle-AABB overlap: true when the circle's edge crosses the rectangle.
  * Uses the distance to the closest point of the rectangle, so it also covers
  * the case where the circle's centre is inside the rectangle (distance 0).
@@ -90,13 +106,15 @@ export const movePlayer = (player, walls, dx, dy) => {
 
 /**
  * Advances the simulation one fixed tick. Pure: it never mutates the state it
- * receives. With no direction the player stays still (no inertia).
+ * receives. With no direction the player stays still (no inertia). The input
+ * vector is normalised first, so a diagonal keeps the same total speed
+ * (220 px/s) instead of moving faster than a straight line.
  * @param {{ level: object, player: { x: number, y: number, r: number } }} state
  * @param {{ up?: boolean, down?: boolean, left?: boolean, right?: boolean }} input
  * @returns {{ level: object, player: { x: number, y: number, r: number } }}
  */
 export const step = (state, input) => {
-  const dir = directionFromInput(input);
+  const dir = normalizeDirection(directionFromInput(input));
   if (dir.x === 0 && dir.y === 0) {
     return { level: state.level, player: { ...state.player } };
   }
