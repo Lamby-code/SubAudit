@@ -5,17 +5,7 @@
 import { TICK_SECONDS, createInitialState, step } from './sim.js';
 import { LEVEL_1 } from './levels.js';
 import { render } from './render.js';
-
-const MOVE_KEYS = new Set([
-  'KeyW',
-  'KeyA',
-  'KeyS',
-  'KeyD',
-  'ArrowUp',
-  'ArrowDown',
-  'ArrowLeft',
-  'ArrowRight',
-]);
+import { keysToInput, isArrowCode } from './input.js';
 
 // Anti-spiral cap: a background tab can deliver a huge elapsed time.
 const MAX_ELAPSED_SECONDS = 0.25;
@@ -28,27 +18,20 @@ const ctx = canvas.getContext('2d');
 const pressed = new Set();
 let state = createInitialState(LEVEL_1);
 
-const readInput = () => ({
-  up: pressed.has('KeyW') || pressed.has('ArrowUp'),
-  down: pressed.has('KeyS') || pressed.has('ArrowDown'),
-  left: pressed.has('KeyA') || pressed.has('ArrowLeft'),
-  right: pressed.has('KeyD') || pressed.has('ArrowRight'),
-});
+// The mapping from event.code to direction lives in input.js; here we only keep
+// every held code and let the pure mapper ignore the ones it does not know.
+const readInput = () => keysToInput(pressed);
 
 const releaseAll = () => pressed.clear();
 
-const isArrow = (code) => code.startsWith('Arrow');
-
 window.addEventListener('keydown', (event) => {
-  if (!MOVE_KEYS.has(event.code)) return;
   // Arrows would scroll the page otherwise.
-  if (isArrow(event.code)) event.preventDefault();
+  if (isArrowCode(event.code)) event.preventDefault();
   pressed.add(event.code);
 });
 
 window.addEventListener('keyup', (event) => {
-  if (!MOVE_KEYS.has(event.code)) return;
-  if (isArrow(event.code)) event.preventDefault();
+  if (isArrowCode(event.code)) event.preventDefault();
   pressed.delete(event.code);
 });
 
