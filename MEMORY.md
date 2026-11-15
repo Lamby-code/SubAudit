@@ -6,7 +6,7 @@ Memoria del proyecto entre sesiones. Máximo ~50 líneas: resume o elimina lo qu
 - Arnés (Harness) completo: `AGENTS.md`, `MEMORY.md`, constitución y agentes SDD.
 - Constitución aprobada con 6 principios en `docs/constitution.md`.
 - Agentes listos en `.opencode/agents/`: `coordinator` (primary), `planner`, `programmer`, `tester`, con modelos gratis asignados.
-- **Hito 001 (esqueleto + Nivel 1) completo:** canvas fijo 960 × 600 centrado, loop de 60 Hz con acumulador, movimiento WASD/flechas, colisiones círculo-AABB con deslizamiento, meta con victoria derivada (≤ 36 px) y pantalla `¡Nivel 1 completado!`.
+- **Hito 001 (esqueleto + Nivel 1) implementado, validado por @tester (APROBADO, segunda vuelta) y commiteado:** canvas fijo 960 × 600 centrado, loop de 60 Hz con acumulador, movimiento WASD/flechas, colisiones círculo-AABB con deslizamiento, meta con victoria derivada (≤ 36 px) y pantalla `¡Nivel 1 completado!`.
 - Tests: **87** en `node --test` (todos en verde) + `node --check` en todos los archivos de `js/` y `test/`.
 - Correcciones post-validación: `js/input.js` (mapeo de teclas puro, hace testeable RF-9/CL-7) y `js/render.js` con `COLORS` + `relativeLuminance`/`contrastRatio` (RNF-4 con umbrales WCAG medidos).
 - Alcance global: webapp de 7 días, 4 niveles, JS vanilla + Canvas 2D.
@@ -29,4 +29,6 @@ Memoria del proyecto entre sesiones. Máximo ~50 líneas: resume o elimina lo qu
 - Medir el canvas con `getImageData` en bucle dispara el warning de `willReadFrequently`: medir una sola vez o recargar antes de revisar la consola.
 
 ## Próximos pasos
-- Segunda vuelta de validación de @tester (se quedó sin cuota de modelo gratis) y verificación final en navegador; después, spec 002: loop de 20 s, grabación de turnos, fantasma, placa/puerta y Nivel 2.
+- Push de `Dev` a `origin` (14 commits locales sin subir) y publicación en **GitHub Pages** (rama `Dev`, carpeta raíz) en https://lamby-code.github.io/SubAudit/ — lo hace el usuario, no un agente.
+- Validar el sitio publicado una vez que esté arriba: carga del canvas, movimiento con WASD/flechas y victoria del Nivel 1.
+- **Spec 002:** loop de 20 s, grabación de turnos, fantasma, placa/puerta y Nivel 2; es el hito más pesado, así que si supera 10 tareas hay que dividirlo.
