@@ -57,12 +57,12 @@ Máximo 10 tareas, en orden de dependencia. Cada una toca ≤3 archivos, entra e
 
 T11 y T12 nacen de los cambios necesarios del tester y quedan fuera del límite original de 10 tareas: no agregan comportamiento ni RF nuevos, solo hacen verificable lo que ya exige la spec (plan `§9`, `§11`, `§12`).
 
-- [ ] **T11. Mapeo de teclas puro.** RF-9, CL-7
+- [x] **T11. Mapeo de teclas puro.** RF-9, CL-7
   - Archivos: `js/input.js`, `js/main.js`, `test/keyboard.test.js`.
   - Objetivo: extraer de `main.js` el mapeo de códigos a entrada en un módulo puro sin DOM (`KEY_BINDINGS`, `keysToInput`, `isArrowCode`) que `main.js` importe; `main.js` conserva el `Set` de `event.code`, el `preventDefault` de flechas y el vaciado en `blur`/`visibilitychange`, sin lógica de mapeo duplicada. `sim.js` sigue sin conocer códigos de teclado.
   - Hecho cuando: `node --test` verde con tests de `keysToInput` para WASD, flechas, teclas desconocidas, `Set` vacío y combinaciones (opuestas apagan su eje); `isArrowCode` verdadero solo para las cuatro flechas; un test de comportamiento vacía el set, pasa la entrada a `step` y comprueba que el jugador no se mueve tick a tick, y que una pulsación nueva sí lo mueve; `input.js` no menciona `document`/`window` ni importa `sim.js`.
 
-- [ ] **T12. Contraste verificable.** RNF-4
+- [x] **T12. Contraste verificable.** RNF-4
   - Archivos: `js/render.js`, `test/render.test.js`.
   - Objetivo: exportar `relativeLuminance` y `contrastRatio` (WCAG 2.x) y `COLORS`, de modo que el render use constantes exportadas en vez de strings de color sueltos.
   - Hecho cuando: `relativeLuminance` da 0 para `#000000` y 1 para `#ffffff`; `contrastRatio` es simétrico y máximo entre blanco y negro; sobre los hex de `COLORS` los umbrales del plan se cumplen (texto/panel ≥ 4.5:1, jugador/fondo ≥ 3:1, jugador/pared ≥ 3:1, meta/fondo ≥ 3:1); los tests de render siguen verificando que la meta se reconoce por forma (`arc` + borde + anillo interior); `node --test` verde.
